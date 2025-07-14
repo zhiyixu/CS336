@@ -3,6 +3,8 @@ from datetime import datetime
 import numpy as np
 from typing import Optional, Union
 import os, sys, time, json
+import itertools
+
 
 class Token():
 
@@ -107,7 +109,7 @@ class Tokenizer():
             start_index = 0
             while 1:
                 if start_index < len(contents) - 1:
-                    if [contents[start_index], contents[start_index + 1]] == vocab:
+                    if [contents[start_index], contents[start_index + 1]] == vocab:  # 直接花式索引拼接列表， 不要内循环
                         ll.append(idx)
                         start_index += 2
                     else:
@@ -122,10 +124,9 @@ class Tokenizer():
         return contents
 
     def decode(self, idx_list: list):
-        ll = []
-        for idx in idx_list:
-            ll += self.vocab_dict[idx]
-        return bytes(ll).decode()
+        return bytes(
+                itertools.chain.from_iterable( [self.vocab_dict[idx] for idx in idx_list] )
+            ).decode()
 
 
 if __name__ == "__main__":
