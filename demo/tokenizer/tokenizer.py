@@ -3,8 +3,6 @@ from datetime import datetime
 import numpy as np
 from typing import Optional, Union
 import os, sys, time, json
-import itertools
-
 
 class Token():
 
@@ -43,13 +41,13 @@ class Tokenizer():
         return contents.encode("utf-8")
 
     def set_contents(self, databytes: bytes=b''):
-        self.txt = list(databytes)
+        self.txt = np.array(databytes, dtype='uint8')
 
-    def take_gram(self) -> list[list]:
+    def take_gram(self) -> list[tuple]:
         """将字节序列转换为二元列表"""
-        return [[self.txt[i], self.txt[i + 1]] for i in range(0, len(self.txt) - 1)]
+        return list(zip(self.txt[:-1], self.txt[1:]))
 
-    def find_max_freq(self, gram_list: list[list[int]]) -> list:
+    def find_max_freq(self, gram_list: list[tuple[int]]) -> list:
         """找到当前内容中频率最高的词"""
         max_freq = 0
         vocab: list[int] = []
@@ -60,7 +58,7 @@ class Tokenizer():
             cnt = np.count_nonzero(first_matches & last_matches)
             if cnt >= max_freq:  # 如果出现更高的频率
                 max_freq = cnt  # 更新当前最高频率
-                vocab = gram  # 记录这个词
+                vocab = list(gram)  # 记录这个词
         return vocab
 
     def update_txt(self, new_vocab: list[list], max_id: int):
@@ -79,6 +77,23 @@ class Tokenizer():
                 sindex += 1
             else:  # 没了
                 break
+        self.txt = new_txt_b # update
+
+    def update_txt_new(self, new_vocab: list[list], max_id: int):
+        new_txt_b = []
+        sindex = 0
+        first_matches = self.txt[:-1] == new_vocab[0]
+        last_matches = self.txt[1:] == new_vocab[1]
+        match_flag = (first_matches & last_matches)  # -> matched flag, is this index matched with the vocab
+        match_index = list(range(len(match_flag))[match_flag])  # -> convent the match flag to start index
+        if match_index[0] != 0:  # the first one not vocab
+            new_txt_b.append(self.txt[:match_index[0]])
+        for i in match_index:
+            next_i = i + 2
+            new_txt_b.append(np.array([max_id])) # inplace
+            # from the very end to the start, in this way, replace not effects exists index for the value
+
+        new_txt_b = np.hstack((self.txt[:i], [max_id], self.txt[i+2:]) for i in match_index)  # -> this data should be remove from txt list,
         self.txt = new_txt_b # update
 
     def update_vocab(self, new_vocab: []) -> int:
@@ -109,7 +124,7 @@ class Tokenizer():
             start_index = 0
             while 1:
                 if start_index < len(contents) - 1:
-                    if [contents[start_index], contents[start_index + 1]] == vocab:  # 直接花式索引拼接列表， 不要内循环
+                    if [contents[start_index], contents[start_index + 1]] == vocab:
                         ll.append(idx)
                         start_index += 2
                     else:
@@ -124,9 +139,10 @@ class Tokenizer():
         return contents
 
     def decode(self, idx_list: list):
-        return bytes(
-                itertools.chain.from_iterable( [self.vocab_dict[idx] for idx in idx_list] )
-            ).decode()
+        ll = []
+        for idx in idx_list:
+            ll += self.vocab_dict[idx]
+        return bytes(ll).decode()
 
 
 if __name__ == "__main__":
