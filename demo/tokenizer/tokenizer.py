@@ -3,6 +3,7 @@ from datetime import datetime
 import numpy as np
 from typing import Optional, Union
 import os, sys, time, json
+import pickle
 
 class Token():
 
@@ -16,7 +17,7 @@ class Tokenizer():
     def __init__(self, vocab_size: int=512):
         self.vocab_dict = OrderedDict()
         self.vocab_size = vocab_size
-        self.txt: list = []
+        self.txt: np.ndarray
         self.tokenizer_file = "./tokenizer.json"
 
         # methods
@@ -41,16 +42,16 @@ class Tokenizer():
         return contents.encode("utf-8")
 
     def set_contents(self, databytes: bytes=b''):
-        self.txt = np.array(databytes, dtype='uint8')
+        self.txt = np.array(list(databytes), dtype='int')
 
-    def take_gram(self) -> list[tuple]:
+    def take_gram(self) -> list[list]:
         """将字节序列转换为二元列表"""
-        return list(zip(self.txt[:-1], self.txt[1:]))
+        return list(map(list,zip(self.txt[:-1].tolist(), self.txt[1:].tolist())))
 
-    def find_max_freq(self, gram_list: list[tuple[int]]) -> list:
+    def find_max_freq(self, gram_list: list[list[int]]) -> list:
         """找到当前内容中频率最高的词"""
         max_freq = 0
-        vocab: list[int] = []
+        vocab = []
         np_txt = np.array(self.txt, dtype=int)  # 这里需要动态生成， 因为txt会被合并
         for gram in gram_list:
             first_matches = np_txt[:-1] == gram[0]
@@ -58,7 +59,7 @@ class Tokenizer():
             cnt = np.count_nonzero(first_matches & last_matches)
             if cnt >= max_freq:  # 如果出现更高的频率
                 max_freq = cnt  # 更新当前最高频率
-                vocab = list(gram)  # 记录这个词
+                vocab = gram  # 记录这个词
         return vocab
 
     def update_txt(self, new_vocab: list[list], max_id: int):
@@ -80,26 +81,24 @@ class Tokenizer():
         self.txt = new_txt_b # update
 
     def update_txt_new(self, new_vocab: list[list], max_id: int):
+        old_txt_b = self.txt.copy()
         new_txt_b = []
-        sindex = 0
         first_matches = self.txt[:-1] == new_vocab[0]
         last_matches = self.txt[1:] == new_vocab[1]
-        match_flag = (first_matches & last_matches)  # -> matched flag, is this index matched with the vocab
-        match_index = list(range(len(match_flag))[match_flag])  # -> convent the match flag to start index
-        if match_index[0] != 0:  # the first one not vocab
-            new_txt_b.append(self.txt[:match_index[0]])
-        for i in match_index:
-            next_i = i + 2
-            new_txt_b.append(np.array([max_id])) # inplace
-            # from the very end to the start, in this way, replace not effects exists index for the value
+        match_flag = np.array(first_matches & last_matches)  # -> matched flag, is this index matched with the vocab
+        match_index = np.arange(len(match_flag))[match_flag][::-1]  # -> convent the match flag to start index
+        for idx in match_index:
+            new_txt_b.append(old_txt_b[idx+2:])
+            new_txt_b.append(np.array([max_id]))
+            old_txt_b = old_txt_b[:idx]
+        new_txt_b.append(old_txt_b)
+        self.txt = np.hstack(new_txt_b[::-1])
 
-        new_txt_b = np.hstack((self.txt[:i], [max_id], self.txt[i+2:]) for i in match_index)  # -> this data should be remove from txt list,
-        self.txt = new_txt_b # update
 
-    def update_vocab(self, new_vocab: []) -> int:
+    def update_vocab(self, new_vocab: list) -> int:
         max_id = len(self.vocab_dict)
         if new_vocab not in list(self.vocab_dict.values()):
-            self.vocab_dict[max_id] = new_vocab
+            self.vocab_dict[max_id] = list(new_vocab)
         return max_id
 
     def train(self):
@@ -109,17 +108,20 @@ class Tokenizer():
             gran_2 = self.take_gram()
             new_vocab = self.find_max_freq(gram_list=gran_2)
             max_id = self.update_vocab(new_vocab=new_vocab)
-            self.update_txt(new_vocab=new_vocab, max_id=max_id)
+            self.update_txt_new(new_vocab=new_vocab, max_id=max_id)
             print(f"{datetime.now()} current vocab size: {len(self.vocab_dict)}, new id: {max_id}")
         t1 = time.time()
         print(f"{datetime.now()} Tokenizer Training Finished, Cost: {t1-t0:.2f}")
         with open(self.tokenizer_file,"w") as f:
-            json.dump(self.vocab_dict, f, indent=4, ensure_ascii=False)
+            json.dump(self.vocab_dict, f, ensure_ascii=True, indent=4)
         print(f"{datetime.now()} Tokenizer File Save To: {self.tokenizer_file}")
 
     def encode(self, raw_txt: str):
         contents = list(raw_txt.encode())
-        for idx, vocab in list(self.vocab_dict.items())[::-1]:
+        print(f"encod contents: {contents}")
+        for idx, vocab in list(self.vocab_dict.items()):
+            if len(vocab) == 1:
+                continue
             ll = []
             start_index = 0
             while 1:
@@ -153,6 +155,7 @@ if __name__ == "__main__":
     tokenizer.train()
     text_txt = "北京奥运会志愿者标志发布，志愿者项目正式启动。6月26日，北京奥组委宣布第29届奥运会主题口号：“同一个世界，同一个梦想”（One World，One Dream）。11月11日，第29届奥运会吉祥物在北京公布"
     idx_list = tokenizer.encode(raw_txt=text_txt)
+    print(idx_list)
     print(f"len raw_txt: {len(text_txt)}, len raw bytes: {len(tokenizer.txt)}, len encode idx: {len(idx_list)}")
     decoded_txt = tokenizer.decode(idx_list=idx_list)
     print(f"Decoded contents: {decoded_txt}")
