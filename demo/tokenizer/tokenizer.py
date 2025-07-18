@@ -3,7 +3,8 @@ from datetime import datetime
 import numpy as np
 from typing import Optional, Union
 import os, sys, time, json
-import pickle
+import itertools
+
 
 class Token():
 
@@ -27,8 +28,6 @@ class Tokenizer():
         """初始化词表，添加基础词"""
         for i in range(256):
             self.vocab_dict[i] = [i]
-
-
 
     def _read_data(self, fname: str):
         if not os.path.exists(fname):
@@ -63,24 +62,6 @@ class Tokenizer():
         return vocab
 
     def update_txt(self, new_vocab: list[list], max_id: int):
-        new_txt_b = []
-        sindex = 0
-        while 1:
-            if sindex < len(self.txt) - 1:  # 还没到最后交界点
-                if [self.txt[sindex], self.txt[sindex + 1]] == new_vocab:  # 需要合并的词
-                    new_txt_b.append(max_id)
-                    sindex += 2
-                else:
-                    new_txt_b.append(self.txt[sindex])
-                    sindex += 1
-            elif sindex == len(self.txt) - 1:  # 刚好是最后一个
-                new_txt_b.append(self.txt[sindex])
-                sindex += 1
-            else:  # 没了
-                break
-        self.txt = new_txt_b # update
-
-    def update_txt_new(self, new_vocab: list[list], max_id: int):
         old_txt_b = self.txt.copy()
         new_txt_b = []
         first_matches = self.txt[:-1] == new_vocab[0]
@@ -98,7 +79,7 @@ class Tokenizer():
     def update_vocab(self, new_vocab: list) -> int:
         max_id = len(self.vocab_dict)
         if new_vocab not in list(self.vocab_dict.values()):
-            self.vocab_dict[max_id] = list(new_vocab)
+            self.vocab_dict[max_id] = list(itertools.chain.from_iterable([self.vocab_dict[i] for i in new_vocab]))
         return max_id
 
     def train(self):
@@ -108,7 +89,7 @@ class Tokenizer():
             gran_2 = self.take_gram()
             new_vocab = self.find_max_freq(gram_list=gran_2)
             max_id = self.update_vocab(new_vocab=new_vocab)
-            self.update_txt_new(new_vocab=new_vocab, max_id=max_id)
+            self.update_txt(new_vocab=new_vocab, max_id=max_id)
             print(f"{datetime.now()} current vocab size: {len(self.vocab_dict)}, new id: {max_id}")
         t1 = time.time()
         print(f"{datetime.now()} Tokenizer Training Finished, Cost: {t1-t0:.2f}")
@@ -116,29 +97,30 @@ class Tokenizer():
             json.dump(self.vocab_dict, f, ensure_ascii=True, indent=4)
         print(f"{datetime.now()} Tokenizer File Save To: {self.tokenizer_file}")
 
-    def encode(self, raw_txt: str):
-        contents = list(raw_txt.encode())
-        print(f"encod contents: {contents}")
+
+    def encode(self, raw_txt: str) -> list:
+        contents = np.array(list(raw_txt.encode("utf-8")))
+        print(f"encode contents: {contents}")
         for idx, vocab in list(self.vocab_dict.items()):
             if len(vocab) == 1:
                 continue
+            match_flag = contents==vocab[0]
+            if sum(match_flag) == 0:
+                continue
             ll = []
-            start_index = 0
-            while 1:
-                if start_index < len(contents) - 1:
-                    if [contents[start_index], contents[start_index + 1]] == vocab:
-                        ll.append(idx)
-                        start_index += 2
-                    else:
-                        ll.append(contents[start_index])
-                        start_index += 1
-                elif start_index == len(contents) - 1:
-                    ll.append(contents[start_index])
-                    start_index += 1
+            # pdb.set_trace()
+            start_index = np.arange(len(match_flag))[match_flag].tolist()[::-1]  # reverse order
+            for index in start_index:
+                if contents[index:index+len(vocab)].tolist() == vocab:  # match
+                    ll.append(contents[index+len(vocab):].tolist())  # first add the rest of data
+                    ll.append([idx])  # merge the matched vocab
                 else:
-                    break
-            contents = ll  # 更新内容
-        return contents
+                    ll.append(contents[index:].tolist())  # if not match , add them all
+                contents = contents[:index]
+            ll.append(contents.tolist())
+            contents = np.array(list(itertools.chain.from_iterable(ll[::-1])))  # 更新内容
+        encode_idx = list(contents)
+        return encode_idx
 
     def decode(self, idx_list: list):
         ll = []
@@ -153,9 +135,9 @@ if __name__ == "__main__":
     data_b = tokenizer._read_data(fname=data)
     tokenizer.set_contents(databytes=data_b)
     tokenizer.train()
-    text_txt = "北京奥运会志愿者标志发布，志愿者项目正式启动。6月26日，北京奥组委宣布第29届奥运会主题口号：“同一个世界，同一个梦想”（One World，One Dream）。11月11日，第29届奥运会吉祥物在北京公布"
+    text_txt = """2008年上半年，奥运场馆测试赛陆续进行，包括手球国际邀请赛、布北京2008年奥运会火炬接力开始。4月2日，北京奥运会火炬接力第一站传递活动在哈萨克斯坦阿拉木图举行。5月4日，奥运圣火从中国"""
     idx_list = tokenizer.encode(raw_txt=text_txt)
-    print(idx_list)
+    print(f"encode idx: {idx_list}")
     print(f"len raw_txt: {len(text_txt)}, len raw bytes: {len(tokenizer.txt)}, len encode idx: {len(idx_list)}")
     decoded_txt = tokenizer.decode(idx_list=idx_list)
     print(f"Decoded contents: {decoded_txt}")
